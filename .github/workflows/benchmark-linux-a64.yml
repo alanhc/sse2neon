@@ -1,0 +1,58 @@
+name: Benchmark Linux A64
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Run benchmark on Linux A64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ cmake
+
+      - name: Cache Benchmark library
+        uses: actions/cache@v4
+        with:
+          path: benchmark
+          key: ${{ runner.os }}-googlebenchmark-a64-v1.8.3
+
+      - name: Build Google Benchmark
+        run: |
+          if [ ! -d "benchmark/build" ]; then
+            git clone --branch v1.8.3 --depth 1 https://github.com/google/benchmark.git
+            cd benchmark
+            cmake -E make_directory "build"
+            cmake -E chdir "build" cmake -DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_TESTING=OFF -DBENCHMARK_ENABLE_LTO=true ..
+            cmake --build "build" --config Release
+          fi
+          
+      - name: Build benchmark
+        run: |
+          g++ -O2 -I. -I./benchmark/include -L./benchmark/build/src -std=gnu++14 -o tests/bench_movemask tests/bench_movemask.cpp -lbenchmark -lpthread -lrt
+
+      - name: Run benchmark
+        run: |
+          ./tests/bench_movemask --benchmark_format=json | tee benchmark.json
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'googlecpp'
+          output-file-path: benchmark.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+          alert-threshold: '200%'
+          comment-on-alert: true
+          fail-on-alert: true
