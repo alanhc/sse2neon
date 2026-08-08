@@ -41,11 +41,11 @@ jobs:
           
       - name: Build benchmark
         run: |
-          arm-linux-gnueabihf-g++ -O2 -mfpu=neon -I. -I./benchmark/include -L./benchmark/build/src -std=gnu++14 -o tests/bench_movemask tests/bench_movemask.cpp -lbenchmark -lpthread -lrt
+          make tests/bench_movemask CXX=arm-linux-gnueabihf-g++ ARCH_CFLAGS="-march=armv7-a -mfpu=neon" CXXFLAGS="" BENCHMARK_CXXFLAGS="-I./benchmark/include" BENCHMARK_LDFLAGS="-L./benchmark/build/src -lbenchmark -lpthread -lrt"
 
       - name: Run benchmark
         run: |
-          ./tests/bench_movemask --benchmark_format=json | tee benchmark.json
+          LD_LIBRARY_PATH=./benchmark/build/src ./tests/bench_movemask --benchmark_format=json | tee benchmark.json
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1

@@ -40,11 +40,11 @@ jobs:
           
       - name: Build benchmark
         run: |
-          g++ -O2 -I. -I./benchmark/include -L./benchmark/build/src -std=gnu++14 -o tests/bench_movemask tests/bench_movemask.cpp -lbenchmark -lpthread -lrt
+          make tests/bench_movemask CXX=g++ CXXFLAGS="-O2" BENCHMARK_CXXFLAGS="-I./benchmark/include" BENCHMARK_LDFLAGS="-L./benchmark/build/src -lbenchmark -lpthread -lrt"
 
       - name: Run benchmark
         run: |
-          ./tests/bench_movemask --benchmark_format=json | tee benchmark.json
+          LD_LIBRARY_PATH=./benchmark/build/src ./tests/bench_movemask --benchmark_format=json | tee benchmark.json
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1

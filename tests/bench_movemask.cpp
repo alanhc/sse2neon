@@ -1,3 +1,20 @@
+/**
+ * Benchmark for _mm_movemask_epi8 and related movemask intrinsics.
+ *
+ * Measures three dimensions:
+ *   1. Throughput: independent calls (pipeline utilization)
+ *   2. Latency: dependent chain (true instruction latency)
+ *   3. In-context: memchr-like string search (realistic usage)
+ *
+ * Build and run:
+ *   make bench-movemask                                    # native x86
+ *   make bench-movemask CROSS_COMPILE=arm-linux-gnueabihf- # ARMv7 + QEMU
+ *   make bench-movemask CROSS_COMPILE=aarch64-linux-gnu-   # AArch64 + QEMU
+ *
+ * Inspired by the methodology in PR #704:
+ *   https://github.com/DLTcollab/sse2neon/pull/704
+ */
+
 #include <benchmark/benchmark.h>
 
 #if defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__)
@@ -6,6 +23,7 @@
 #include <emmintrin.h>
 #include <xmmintrin.h>
 #endif
+
 #include <cstdint>
 #include <cstring>
 
@@ -28,25 +46,31 @@ __m128i data_rand[N_DATA];
 
 void init_data()
 {
-    for (int i = 0; i < N_DATA; i++) {
-        data_zero[i] = _mm_setzero_si128();
-        data_all[i] = _mm_set1_epi8((char) 0xFF);
-        data_alt[i] = _mm_set_epi8(0x00, (char) 0x80, 0x00, (char) 0x80, 0x00,
-                                   (char) 0x80, 0x00, (char) 0x80, 0x00,
-                                   (char) 0x80, 0x00, (char) 0x80, 0x00,
-                                   (char) 0x80, 0x00, (char) 0x80);
-        data_cmpresult[i] = _mm_set_epi8(
-            (char) 0xFF, 0x00, (char) 0xFF, 0x00, (char) 0xFF, (char) 0xFF,
-            0x00, 0x00, (char) 0xFF, (char) 0xFF, (char) 0xFF, 0x00, 0x00, 0x00,
-            (char) 0xFF, (char) 0xFF);
-    }
-
     uint32_t rng = 42;
+    volatile char dyn_zero = 0;  // Prevent constant-folding at -O3
+
     for (int i = 0; i < N_DATA; i++) {
         uint32_t r[4];
         for (int j = 0; j < 4; j++)
             r[j] = xorshift32(&rng);
         data_rand[i] = _mm_loadu_si128((const __m128i *) r);
+
+        /* Derive other arrays using dyn_zero so they aren't compile-time
+         * constants */
+        data_zero[i] = _mm_set1_epi8((char) dyn_zero);
+        data_all[i] = _mm_set1_epi8((char) (dyn_zero | 0xFF));
+
+        char v80 = (char) (dyn_zero | 0x80);
+        data_alt[i] = _mm_set_epi8((char) dyn_zero, v80, (char) dyn_zero, v80,
+                                   (char) dyn_zero, v80, (char) dyn_zero, v80,
+                                   (char) dyn_zero, v80, (char) dyn_zero, v80,
+                                   (char) dyn_zero, v80, (char) dyn_zero, v80);
+
+        char vFF = (char) (dyn_zero | 0xFF);
+        data_cmpresult[i] = _mm_set_epi8(
+            vFF, (char) dyn_zero, vFF, (char) dyn_zero, vFF, vFF,
+            (char) dyn_zero, (char) dyn_zero, vFF, vFF, vFF, (char) dyn_zero,
+            (char) dyn_zero, (char) dyn_zero, vFF, vFF);
     }
 }
 
