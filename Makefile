@@ -361,7 +361,29 @@ fuzz-clean:
 	$(RM) -r $(FUZZ_CORPUS)
 	$(RM) crash-* leak-* timeout-* oom-*
 
-.PHONY: clean check check-main check-ieee754 check-nan check-aes check-ubsan check-asan check-strict-aliasing check-uninit check-macros check-differential generate-golden coverage-report indent ieee754 nan aes fuzz fuzz-verbose fuzz-clean
+# Movemask benchmark
+BENCH_MOVEMASK_SRC = tests/bench_movemask.cpp
+BENCH_MOVEMASK_EXEC = tests/bench_movemask
+
+# Additional flags for benchmark if needed (e.g. from CI)
+BENCHMARK_CXXFLAGS ?=
+BENCHMARK_LDFLAGS ?= -lbenchmark -lpthread
+ifeq ($(UNAME_S),Darwin)
+else
+BENCHMARK_LDFLAGS += -lrt
+endif
+$(BENCH_MOVEMASK_EXEC): $(BENCH_MOVEMASK_SRC) sse2neon.h
+	$(CXX) -O2 $(ARCH_CFLAGS) $(CXXFLAGS) $(BENCHMARK_CXXFLAGS) -I. -std=gnu++14 $(LDFLAGS) -o $@ $< $(BENCHMARK_LDFLAGS)
+
+bench-movemask: $(BENCH_MOVEMASK_EXEC)
+ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
+	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+endif
+	$(EXEC_WRAPPER) $^ $(BENCH_ARGS)
+
+bench: bench-movemask
+
+.PHONY: clean check check-main check-ieee754 check-nan check-aes check-ubsan check-asan check-strict-aliasing check-uninit check-macros check-differential generate-golden coverage-report indent ieee754 nan aes fuzz fuzz-verbose fuzz-clean bench bench-movemask
 clean:
 	$(RM) $(OBJS) $(EXEC) $(deps) sse2neon.h.gch
 	$(RM) $(IEEE754_OBJS) $(IEEE754_EXEC) $(ieee754_deps)
@@ -369,6 +391,7 @@ clean:
 	$(RM) $(AES_OBJS) $(AES_EXEC) $(aes_deps)
 	$(RM) $(DIFFERENTIAL_OBJS) $(DIFFERENTIAL_EXEC) $(differential_deps)
 	$(RM) $(FUZZ_EXEC)
+	$(RM) $(BENCH_MOVEMASK_EXEC)
 
 -include $(deps)
 -include $(ieee754_deps)

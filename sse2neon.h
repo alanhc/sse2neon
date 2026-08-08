@@ -5774,33 +5774,20 @@ FORCE_INLINE int _mm_movemask_epi8(__m128i a)
     return vaddv_u8(vget_low_u8(positioned)) |
            (vaddv_u8(vget_high_u8(positioned)) << 8);
 #else
-    // ARMv7: Shift-right-accumulate (no vaddv).
+    // ARMv7: Pairwise add
     //
-    // Step 1: Extract MSB of each byte
-    uint8x16_t msbs = vshrq_n_u8(input, 7);
-    uint64x2_t bits = vreinterpretq_u64_u8(msbs);
-
-    // Step 2: Parallel bit collection via shift-right-accumulate
-    //
-    //   Initial (8 bytes shown):
-    //   byte:     [  0 ][  1 ][  2 ][  3 ][  4 ][  5 ][  6 ][  7 ]
-    //   value:    [ 01 ][ 00 ][ 01 ][ 01 ][ 00 ][ 01 ][ 00 ][ 01 ]
-    //
-    //   vsra(..., 7):  add original + (original >> 7)
-    //   byte 1 gets: orig[1] + orig[0] = b1|b0 in bits [1:0]
-    //   byte 3 gets: orig[3] + orig[2] = b3|b2 in bits [1:0]
-    //   ...
-    //   Result: pairs combined into odd bytes
-    //
-    //   vsra(..., 14): combine pairs -> 4 bits in bytes 3,7
-    //   vsra(..., 28): combine all   -> 8 bits in byte 7 (actually byte 0)
-    bits = vsraq_n_u64(bits, bits, 7);
-    bits = vsraq_n_u64(bits, bits, 14);
-    bits = vsraq_n_u64(bits, bits, 28);
-
-    // Step 3: Extract packed result from byte 0 of each half
-    uint8x16_t output = vreinterpretq_u8_u64(bits);
-    return vgetq_lane_u8(output, 0) | (vgetq_lane_u8(output, 8) << 8);
+    // Step 1: Extract MSB of each byte as 0x00 or 0xFF
+    int8x16_t mask = vshrq_n_s8(vreinterpretq_s8_u8(input), 7);
+    // Step 2: Apply powers of 2 (1, 2, 4, 8, 16, 32, 64, 128)
+    static const uint8_t w[16] = {1, 2, 4, 8, 16, 32, 64, 128,
+                                  1, 2, 4, 8, 16, 32, 64, 128};
+    uint8x16_t weighted = vandq_u8(vreinterpretq_u8_s8(mask), vld1q_u8(w));
+    // Step 3: Pairwise add to accumulate the bits
+    uint8x8_t p = vpadd_u8(vget_low_u8(weighted), vget_high_u8(weighted));
+    p = vpadd_u8(p, p);
+    p = vpadd_u8(p, p);
+    // Step 4: Extract the 16-bit mask
+    return vget_lane_u16(vreinterpret_u16_u8(p), 0);
 #endif
 }
 
