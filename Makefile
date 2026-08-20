@@ -68,6 +68,16 @@ else
 SANITIZE_FLAGS =
 endif
 
+# Opt-in SVE2 code paths: SVE=1 defines SSE2NEON_ENABLE_SVE.
+# Pair with FEATURE=sve2 so the compiler also reports __ARM_FEATURE_SVE2;
+# without it the header silently keeps the NEON paths.
+SVE ?=
+ifneq ($(SVE),)
+SVE_FLAGS = -DSSE2NEON_ENABLE_SVE=1
+else
+SVE_FLAGS =
+endif
+
 # Strict aliasing checking: STRICT_ALIASING=1 to enable
 STRICT_ALIASING ?=
 ifneq ($(STRICT_ALIASING),)
@@ -94,7 +104,7 @@ else
 EXTRA_WARNINGS_FLAGS =
 endif
 
-CXXFLAGS += -Wall -Wcast-qual -Wold-style-cast -Wconversion -I. $(ARCH_CFLAGS) -std=gnu++14 $(SANITIZE_FLAGS) $(STRICT_ALIASING_FLAGS) $(EXTRA_WARNINGS_FLAGS)
+CXXFLAGS += -Wall -Wcast-qual -Wold-style-cast -Wconversion -I. $(ARCH_CFLAGS) -std=gnu++14 $(SANITIZE_FLAGS) $(STRICT_ALIASING_FLAGS) $(EXTRA_WARNINGS_FLAGS) $(SVE_FLAGS)
 LDFLAGS  += -lm $(SANITIZE_FLAGS)
 OBJS = \
     tests/binding.o \
@@ -147,25 +157,25 @@ $(AES_EXEC): $(AES_OBJS)
 
 ieee754: $(IEEE754_EXEC)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) $^
 
 nan: $(NAN_EXEC)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) $^
 
 aes: $(AES_EXEC)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) $^
 
 check: tests/main $(IEEE754_EXEC) $(NAN_EXEC) $(AES_EXEC)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) tests/main
 	$(EXEC_WRAPPER) $(IEEE754_EXEC)
@@ -189,30 +199,56 @@ indent:
 # Convenience target for running only main tests (skip IEEE-754)
 check-main: $(EXEC)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) $(EXEC)
 
 # Convenience target for running only IEEE-754 edge case tests (skip main)
 check-ieee754: $(IEEE754_EXEC)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) $(IEEE754_EXEC)
 
 # Convenience target for running only NaN propagation tests (skip main)
 check-nan: $(NAN_EXEC)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) $(NAN_EXEC)
 
 # Convenience target for running only AES validation tests (skip main)
 check-aes: $(AES_EXEC)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) $(AES_EXEC)
+
+# Convenience target for the opt-in SVE2 code paths.
+#
+# __m128 is a fixed 128-bit contract, so the SVE paths use fixed-width
+# predicates (svptrue_pat_b8(SV_VL16) and friends) rather than VLA loops.
+# They are written with sizeless SVE types only and so must stay correct at
+# every hardware vector length -- this target proves that by re-running the
+# whole suite at each length in SVE_VECTOR_LENGTHS (bytes) under QEMU.
+#
+# Usage: make CROSS_COMPILE=aarch64-linux-gnu- check-sve
+SVE_VECTOR_LENGTHS ?= 16 32 64
+
+check-sve:
+ifeq ($(EXEC_WRAPPER),)
+	@echo "== SVE2 build, native (vector length is whatever the CPU provides) =="
+	$(MAKE) clean
+	$(MAKE) SVE=1 FEATURE=sve2 check
+else
+	@for vl in $(SVE_VECTOR_LENGTHS); do \
+	    echo "== SVE2 build, hardware vector length $$vl bytes =="; \
+	    $(MAKE) clean > /dev/null || exit 1; \
+	    $(MAKE) SVE=1 FEATURE=sve2 \
+	        EXEC_WRAPPER="$(EXEC_WRAPPER) -cpu max,sve-default-vector-length=$$vl" \
+	        check || exit 1; \
+	done
+endif
 
 # Convenience target for running tests with UBSan
 check-ubsan: clean
@@ -283,7 +319,7 @@ check-differential: $(DIFFERENTIAL_EXEC)
 		exit 1; \
 	fi
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) $(DIFFERENTIAL_EXEC) --verify $(GOLDEN_DIR)
 
@@ -377,13 +413,13 @@ $(BENCH_MOVEMASK_EXEC): $(BENCH_MOVEMASK_SRC) sse2neon.h
 
 bench-movemask: $(BENCH_MOVEMASK_EXEC)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64 arm armv7l))
-	$(CC) $(ARCH_CFLAGS) -c sse2neon.h
+	$(CC) $(ARCH_CFLAGS) $(SVE_FLAGS) -c sse2neon.h
 endif
 	$(EXEC_WRAPPER) $^ $(BENCH_ARGS)
 
 bench: bench-movemask
 
-.PHONY: clean check check-main check-ieee754 check-nan check-aes check-ubsan check-asan check-strict-aliasing check-uninit check-macros check-differential generate-golden coverage-report indent ieee754 nan aes fuzz fuzz-verbose fuzz-clean bench bench-movemask
+.PHONY: clean check check-main check-ieee754 check-nan check-aes check-sve check-ubsan check-asan check-strict-aliasing check-uninit check-macros check-differential generate-golden coverage-report indent ieee754 nan aes fuzz fuzz-verbose fuzz-clean bench bench-movemask
 clean:
 	$(RM) $(OBJS) $(EXEC) $(deps) sse2neon.h.gch
 	$(RM) $(IEEE754_OBJS) $(IEEE754_EXEC) $(ieee754_deps)
