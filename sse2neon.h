@@ -4228,13 +4228,13 @@ FORCE_INLINE void _mm_clflush(void const *p)
 #if defined(__APPLE__)
     sys_icache_invalidate(_sse2neon_const_cast(void *, p),
                           SSE2NEON_CACHELINE_SIZE);
+#elif SSE2NEON_COMPILER_MSVC && SSE2NEON_INCLUDE_WINDOWS_H
+    FlushInstructionCache(GetCurrentProcess(), p, SSE2NEON_CACHELINE_SIZE);
 #elif SSE2NEON_COMPILER_GCC_COMPAT
     uintptr_t ptr = _sse2neon_reinterpret_cast(uintptr_t, p);
     __builtin___clear_cache(
         _sse2neon_reinterpret_cast(char *, ptr),
         _sse2neon_reinterpret_cast(char *, ptr) + SSE2NEON_CACHELINE_SIZE);
-#elif SSE2NEON_COMPILER_MSVC && SSE2NEON_INCLUDE_WINDOWS_H
-    FlushInstructionCache(GetCurrentProcess(), p, SSE2NEON_CACHELINE_SIZE);
 #endif
 }
 
