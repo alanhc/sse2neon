@@ -50,6 +50,8 @@ ifdef ARCH_CFLAGS_IS_SET
 endif
 
 COMMA := ,
+EMPTY :=
+SPACE := $(EMPTY) $(EMPTY)
 
 FEATURE ?=
 ifneq ($(FEATURE),)
@@ -351,14 +353,21 @@ FUZZ_CXXFLAGS = -g -O1 -fsanitize=fuzzer,address,undefined -fno-omit-frame-point
 # Enable crypto extensions for AES and CLMUL testing on AArch64
 FUZZ_ARCH_FLAGS := $(ARCH_CFLAGS)
 ifeq ($(processor),$(filter $(processor),aarch64 arm64))
-FUZZ_ARCH_FLAGS := -march=armv8-a+fp+simd+crypto+crc
-# The -march above replaces ARCH_CFLAGS, so FEATURE has to be folded back in
-# here; without it SVE=1 FEATURE=sve2 would fuzz the NEON paths only.
+# The -march below replaces ARCH_CFLAGS, so FEATURE has to be folded back in
+# here; without it SVE=1 FEATURE=sve2 would fuzz the NEON paths only. Anything
+# the fuzzer already asks for is filtered out first, so FEATURE=crypto+crc does
+# not append a second +crypto+crc.
+FUZZ_BASE_FEATURES := fp simd crypto crc
+FUZZ_EXTRA_FEATURES :=
 ifneq ($(FEATURE),)
 ifneq ($(FEATURE),none)
-FUZZ_ARCH_FLAGS := $(FUZZ_ARCH_FLAGS)+$(subst $(COMMA),+,$(FEATURE))
+FUZZ_EXTRA_FEATURES := $(filter-out $(FUZZ_BASE_FEATURES), \
+    $(subst +, ,$(subst $(COMMA), ,$(FEATURE))))
 endif
 endif
+# $(addprefix) yields space-separated words, which would reach the compiler as
+# separate argv tokens; collapse them back into one +a+b string.
+FUZZ_ARCH_FLAGS := -march=armv8-a+fp+simd+crypto+crc$(subst $(SPACE),,$(addprefix +,$(FUZZ_EXTRA_FEATURES)))
 endif
 FUZZ_CXXFLAGS += -Wall -Wno-unused-function -I. $(FUZZ_ARCH_FLAGS) -std=gnu++14 $(SVE_FLAGS)
 
